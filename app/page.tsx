@@ -1,101 +1,208 @@
-import Image from "next/image";
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import PitchInput from "@/components/PitchInput";
+import LoadingState from "@/components/LoadingState";
+import SynopsisCard from "@/components/SynopsisCard";
+import CharacterList from "@/components/CharacterList";
+import NarrateButton from "@/components/NarrateButton";
+import { getRandomPitch } from "@/lib/randomPitches";
+import type { StorySchema } from "@/types/story";
+
+const TYPEWRITER_MS = 18;
+
+function getCinematicVoice(): SpeechSynthesisVoice | null {
+  if (typeof window === "undefined") return null;
+  const voices = window.speechSynthesis.getVoices();
+  return (
+    voices.find((v) =>
+      /daniel|alex|fred|google uk english male|microsoft david|english.*male/i.test(
+        v.name
+      )
+    ) ??
+    voices.find((v) => v.lang.startsWith("en")) ??
+    voices[0] ??
+    null
+  );
+}
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="https://nextjs.org/icons/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+  const [pitch, setPitch] = useState("");
+  const [story, setStory] = useState<StorySchema | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [narrating, setNarrating] = useState(false);
+  const [displayedText, setDisplayedText] = useState("");
+  const [typewriterDone, setTypewriterDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="https://nextjs.org/icons/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
+  const synopsisRef = useRef<HTMLElement>(null);
+  const typewriterTimerRef = useRef<ReturnType<typeof setInterval> | null>(
+    null
+  );
+
+  const clearTypewriter = useCallback(() => {
+    if (typewriterTimerRef.current) {
+      clearInterval(typewriterTimerRef.current);
+      typewriterTimerRef.current = null;
+    }
+  }, []);
+
+  const stopNarration = useCallback(() => {
+    if (typeof window !== "undefined") {
+      window.speechSynthesis.cancel();
+    }
+    setNarrating(false);
+  }, []);
+
+  const startTypewriter = useCallback(
+    (synopsis: string) => {
+      clearTypewriter();
+      setDisplayedText("");
+      setTypewriterDone(false);
+
+      let index = 0;
+      typewriterTimerRef.current = setInterval(() => {
+        index += 1;
+        setDisplayedText(synopsis.slice(0, index));
+        if (index >= synopsis.length) {
+          clearTypewriter();
+          setTypewriterDone(true);
+        }
+      }, TYPEWRITER_MS);
+    },
+    [clearTypewriter]
+  );
+
+  const handleGenerate = useCallback(async () => {
+    const trimmed = pitch.trim();
+    if (!trimmed || loading) return;
+
+    setLoading(true);
+    setError(null);
+    setStory(null);
+    setDisplayedText("");
+    setTypewriterDone(false);
+    clearTypewriter();
+    stopNarration();
+
+    try {
+      const res = await fetch("/api/story", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pitch: trimmed }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error ?? "Failed to generate story");
+      }
+
+      const generated = data as StorySchema;
+      setStory(generated);
+      startTypewriter(generated.synopsis);
+
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          synopsisRef.current?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+        }, 100);
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  }, [pitch, loading, clearTypewriter, stopNarration, startTypewriter]);
+
+  const startNarration = useCallback(() => {
+    if (!story || !typewriterDone) return;
+
+    stopNarration();
+
+    const text = `${story.tagline}. ${story.synopsis} And the twist... ${story.twist}`;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.88;
+    utterance.pitch = 1.05;
+
+    const voice = getCinematicVoice();
+    if (voice) utterance.voice = voice;
+
+    utterance.onend = () => setNarrating(false);
+    utterance.onerror = () => setNarrating(false);
+
+    setNarrating(true);
+    window.speechSynthesis.speak(utterance);
+  }, [story, typewriterDone, stopNarration]);
+
+  const handleNarrateToggle = useCallback(() => {
+    if (narrating) {
+      stopNarration();
+    } else {
+      startNarration();
+    }
+  }, [narrating, stopNarration, startNarration]);
+
+  useEffect(() => {
+    const loadVoices = () => getCinematicVoice();
+    loadVoices();
+    window.speechSynthesis?.addEventListener("voiceschanged", loadVoices);
+    return () => {
+      window.speechSynthesis?.removeEventListener("voiceschanged", loadVoices);
+      clearTypewriter();
+      stopNarration();
+    };
+  }, [clearTypewriter, stopNarration]);
+
+  return (
+    <main className="relative z-10 min-h-screen px-4 py-12 md:py-20">
+      <header className="text-center mb-12 md:mb-16">
+        <h1 className="marquee-title text-3xl md:text-5xl mb-4">
+          Story Pitch AI
+        </h1>
+        <p className="text-[var(--cream)]/50 text-sm md:text-base tracking-wide max-w-md mx-auto">
+          One wild sentence in. A cinematic legend out.
+        </p>
+      </header>
+
+      <PitchInput
+        pitch={pitch}
+        onPitchChange={setPitch}
+        onSubmit={handleGenerate}
+        onRandomPitch={() => setPitch(getRandomPitch())}
+        loading={loading}
+      />
+
+      {error && (
+        <p className="mt-6 text-center text-[#c0392b] text-sm max-w-lg mx-auto">
+          {error}
+        </p>
+      )}
+
+      {loading && <LoadingState />}
+
+      {story && !loading && (
+        <section className="mt-12 space-y-2">
+          <SynopsisCard
+            ref={synopsisRef}
+            story={story}
+            displayedText={displayedText}
+            typewriterDone={typewriterDone}
           />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+          {typewriterDone && (
+            <>
+              <CharacterList characters={story.characters} />
+              <NarrateButton
+                narrating={narrating}
+                disabled={!typewriterDone}
+                onToggle={handleNarrateToggle}
+              />
+            </>
+          )}
+        </section>
+      )}
+    </main>
   );
 }
