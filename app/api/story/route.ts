@@ -7,12 +7,15 @@ const MAX_PITCH_LENGTH = 500;
 
 const SYSTEM_PROMPT = `You are a Hollywood story analyst. Given a one-sentence pitch,
 return ONLY raw valid JSON with no markdown, no backticks, no explanation.
+
+Write a concise but cinematic story. The synopsis must be 3-4 paragraphs (roughly 450-600 words total) covering a clear three-act arc: setup, conflict, and resolution. Use vivid detail but stay tight—no padding. Include 3-4 characters with distinct roles. The twist should be 1-2 sentences.
+
 Schema:
 {
   "title": string,
   "genre": string,
   "tagline": string,
-  "synopsis": string (3-4 paragraphs, full story arc),
+  "synopsis": string,
   "characters": [{ "name": string, "role": string }],
   "twist": string
 }`;
@@ -76,10 +79,14 @@ export async function POST(request: Request) {
 
     const completion = await groq.chat.completions.create({
       model: MODEL,
-      temperature: 0.8,
+      temperature: 0.85,
+      max_tokens: 2048,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: pitch },
+        {
+          role: "user",
+          content: `Pitch: ${pitch}\n\nGenerate the cinematic story JSON now. Keep the synopsis within 450-600 words.`,
+        },
       ],
     });
 

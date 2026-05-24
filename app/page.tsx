@@ -11,19 +11,27 @@ import type { StorySchema } from "@/types/story";
 
 const TYPEWRITER_MS = 18;
 
-function getCinematicVoice(): SpeechSynthesisVoice | null {
+function getWarmVoice(): SpeechSynthesisVoice | null {
   if (typeof window === "undefined") return null;
   const voices = window.speechSynthesis.getVoices();
-  return (
-    voices.find((v) =>
-      /daniel|alex|fred|google uk english male|microsoft david|english.*male/i.test(
-        v.name
-      )
-    ) ??
-    voices.find((v) => v.lang.startsWith("en")) ??
-    voices[0] ??
-    null
+  const en = voices.filter((v) => v.lang.startsWith("en"));
+
+  const warmPatterns = [
+    /samantha|karen|victoria|moira|tessa|fiona|serena|ava|aria|zira|susan|allison|kate|jenny|nicole|sarah|emma|hazel|linda|female/i,
+    /google (?:us )?english female|microsoft (?:aria|zira|jenny)|enhanced/i,
+  ];
+
+  for (const pattern of warmPatterns) {
+    const match = en.find((v) => pattern.test(v.name));
+    if (match) return match;
+  }
+
+  const softMale = en.find((v) =>
+    /daniel|james|oliver|thomas|uk english male/i.test(v.name)
   );
+  if (softMale) return softMale;
+
+  return en[0] ?? voices[0] ?? null;
 }
 
 export default function Home() {
@@ -124,10 +132,11 @@ export default function Home() {
 
     const text = `${story.tagline}. ${story.synopsis} And the twist... ${story.twist}`;
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.88;
-    utterance.pitch = 1.05;
+    utterance.rate = 0.82;
+    utterance.pitch = 0.92;
+    utterance.volume = 0.95;
 
-    const voice = getCinematicVoice();
+    const voice = getWarmVoice();
     if (voice) utterance.voice = voice;
 
     utterance.onend = () => setNarrating(false);
@@ -146,7 +155,7 @@ export default function Home() {
   }, [narrating, stopNarration, startNarration]);
 
   useEffect(() => {
-    const loadVoices = () => getCinematicVoice();
+    const loadVoices = () => getWarmVoice();
     loadVoices();
     window.speechSynthesis?.addEventListener("voiceschanged", loadVoices);
     return () => {
